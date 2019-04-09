@@ -1,0 +1,68 @@
+#!/bin/bash
+# vim: set ft=bash textwidth=80
+set -e
+
+if ([[ -t 1 ]] && [[ -t 2 ]] && [[ "$VIMRUNTIME" == "" ]]); then
+	export WMAKE_INTERACTIVE="1"
+	export C_RED="\e[1;31m"
+	export C_GREEN="\e[1;32m"
+	export C_YELLOW="\e[1;33m"
+	export C_RESET="\e[0m"
+else
+	export WMAKE_INTERACTIVE="0"
+	export C_RED=""
+	export C_GREEN=""
+	export C_YELLOW=""
+	export C_RESET=""
+fi
+
+function del-bad-logs() {
+  # Some log entries begin with a timestamp and vim doesn't like it Also, get
+  # rid of CRs
+  sed -u -E \
+	-e 's/^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]:.(.*)$/\1/' \
+	-e 's/^\b([A-Z0-9]+) [0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9]+(.*)/\1\2/'
+}
+
+if [[ $PWD != "/" ]]; then
+	WMAKE_FILE=$PWD/.wmake
+else
+	WMAKE_FILE=/.wmake
+fi
+
+if ! [[ -e $WMAKE_FILE ]]; then
+	echo -e "${C_YELLOW}Could not find $WMAKE_FILE.${C_RESET}"
+	if [[ $PWD != "/" ]]; then
+		cd ..
+		stdbuf -oL -eL $0 $*
+		exit $?
+	else
+		echo -e "${C_RED}ERROR: Could not find .wmake in any parent directory. Quitting.${C_RESET}"
+		exit 1
+	fi
+fi
+
+if ! [[ -x $WMAKE_FILE ]]; then
+	echo -e "${C_YELLOW}$WMAKE_FILE is not marked as executable. Doing so...${C_RESET}"
+	if ! chmod +x $WMAKE_FILE; then
+		echo -e "${C_RED}Failed to mark $WMAKE_FILE as executable. Quitting.${C_RESET}"
+		exit 1
+	fi
+fi 
+
+echo -e "Attempting to run ${C_YELLOW}$WMAKE_FILE${C_RESET}..."
+(
+	shellcheck -f gcc $WMAKE_FILE
+	if stdbuf -oL -eL $WMAKE_FILE 2>/dev/null; then
+		exit $?
+	fi
+) | (
+	if [[ "$WMAKE_INTERACTIVE" == "1" ]]; then
+		stdbuf -oL -eL cat
+	else
+		# let's clean up our act.
+		sed -u -E \
+			-e "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g" \
+			-e 's/\r/\n/g'
+	fi
+) | del-bad-logs
